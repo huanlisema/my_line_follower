@@ -49,15 +49,15 @@ def generate_launch_description():
             )
     ld.add_action(cam_launch)
     #启动雷达
-    # lidar_launch = IncludeLaunchDescription(
-    #         launch_description_source = PythonLaunchDescriptionSource(
-    #             os.path.join(
-    #                 get_package_share_directory("peripherals"),
-    #                 "launch",
-    #                 "include",
-    #                 "ms200_scan.launch.py"
-    #             )
-    #         )
-    #     )
-    # ld.add_action(lidar_launch)
+    lidar_launch = IncludeLaunchDescription(
+            launch_description_source = PythonLaunchDescriptionSource(
+                os.path.join(
+                    get_package_share_directory("peripherals"),
+                    "launch",
+                    "include",
+                    "ms200_scan.launch.py"
+                )
+            )
+        )
+    ld.add_action(lidar_launch)
     return ld
