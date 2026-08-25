@@ -2,6 +2,7 @@
 #include "sensor_msgs/msg/image.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "std_msgs/msg/bool.hpp"
 #include "cv_bridge/cv_bridge.h"
 #include <opencv2/opencv.hpp>
 #include "my_line_follower/pid.hpp"
@@ -131,7 +132,9 @@ public:
                             scan_angle(45.0),
                             stop_threshold(0.4),
                             stop(false),
-                            count(0)
+                            yolo_stop(false),
+                            count(0),
+                            yolo_false_count(0)
     {
         mylinefollower = std::make_shared<MyLineFollower>();
         pid = std::make_shared<PID>(1.1, 0.0, 0.0);
@@ -141,9 +144,35 @@ public:
         mecanum_pub = create_publisher<geometry_msgs::msg::Twist>("/controller/cmd_vel", 1);
         lidar_sub = create_subscription<sensor_msgs::msg::LaserScan>("/scan_raw", 10,
                                                                      std::bind(&MyLineFollowingNode::lidar_cb, this, _1));
+        stop_sub = create_subscription<std_msgs::msg::Bool>("/stop_detected", 10, std::bind(&MyLineFollowingNode::stop_callback, this, _1));
     }
 
 private:
+    void stop_callback(const std_msgs::msg::Bool::SharedPtr msg)
+    {
+        if (msg->data)
+        {
+            yolo_false_count = 0;
+            if (!yolo_stop)
+            {
+                yolo_stop = true;
+                RCLCPP_WARN(this->get_logger(), "YOLO检测到STOP标志，小车停车！");
+            }
+        }
+        else
+        { 
+            yolo_false_count++;
+            // 连续5次false,才解除STOP 
+            if (yolo_false_count >= 5)
+            {
+                if (yolo_stop)
+                {
+                    yolo_stop = false;
+                }
+                yolo_false_count = 0;
+            }
+        }
+    }
     void image_cb(const sensor_msgs::msg::Image &ros_image)
     {
         // 转换成opencv图像
@@ -174,6 +203,14 @@ private:
             twist.angular.z = 0.0;
             mecanum_pub->publish(twist);
             RCLCPP_INFO(this->get_logger(), "检测到障碍物，停车！");
+            return;
+        }
+        if (yolo_stop)
+        {
+            twist.linear.x = 0.0;
+            twist.angular.z = 0.0;
+            mecanum_pub->publish(twist);
+            RCLCPP_INFO(this->get_logger(), "识别到stop标志，停车！");
             return;
         }
         // 偏差角 -> PID
@@ -216,7 +253,7 @@ private:
         filter_ranges(left_range, left_valid);
         filter_ranges(right_range, right_valid);
         bool obstacle = false;
-        //判断左边数据集
+        // 判断左边数据集
         if (!left_valid.empty())
         {
             // 取最近距离
@@ -224,7 +261,7 @@ private:
             if (min_dist_left < stop_threshold)
                 obstacle = true;
         }
-        //判断右边数据集
+        // 判断右边数据集
         if (!right_valid.empty())
         {
             // 取最近距离
@@ -274,7 +311,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr result_image_pub; // 发布图片
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr mecanum_pub;    // 发布速度
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr lidar_sub; // 雷达订阅
-
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr stop_sub;
     int image_height; // 图片高
     int image_width;  // 图片宽
     double threshold; // 颜色偏差系数
@@ -284,7 +321,10 @@ private:
     double scan_angle;     // 雷达避障角度范围(角度制)
     double stop_threshold; // 雷达避障距离
     bool stop;
+    bool yolo_stop;
     int count;
+    int yolo_false_count;
+    
 };
 
 int main(int argc, char const *argv[])
